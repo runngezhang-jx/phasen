@@ -219,12 +219,13 @@ class PHASEN(nn.Module):
                         nn.ReLU(),
                     )
         self.phase_conv2 = nn.Sequential(
-                        nn.Conv1d(channel_phase,2,kernel_size=[1,1])
+                        nn.Conv2d(channel_phase,2,kernel_size=[1,1])
                     )
         self.rnn = nn.GRU(
                         self.feat_dim * 8,
                         rnn_nums,
-                        bidirectional=True
+                        bidirectional=True,
+                        batch_first=True
                     )
         self.fcs = nn.Sequential(
                     nn.Linear(rnn_nums*2,600),
@@ -307,7 +308,7 @@ class PHASEN(nn.Module):
         #t = amp_spec 
         return est_spec, est_wav# , [t[0], spec[0], phase[0]]
     
-    def loss(self, est, labels, mode='Mix'):
+    def loss(self, est, labels, mode='Mix',eps=1e-8):
         '''
         mode == 'Mix'
             est: [B, F*2, T]
@@ -326,18 +327,21 @@ class PHASEN(nn.Module):
             b, d, t = est.size()
             gth_cspec = self.stft(labels)
             est_cspec = est  
-            gth_mag_spec = torch.sqrt(
-                                    gth_cspec[:, :self.feat_dim, :]**2
+            gth_pow_spec = gth_cspec[:, :self.feat_dim, :]**2 \
                                     +gth_cspec[:, self.feat_dim:, :]**2
+            gth_mag_spec = torch.sqrt(
+                                torch.clamp(gth_pow_spec,eps)
                                )
-            est_mag_spec = torch.sqrt(
-                                    est_cspec[:, :self.feat_dim, :]**2
+                                    
+            est_pow_spec  = est_cspec[:, :self.feat_dim, :]**2 \
                                     +est_cspec[:, self.feat_dim:, :]**2
+            est_mag_spec = torch.sqrt(
+                                torch.clamp(est_pow_spec,eps)
                                 )
             
             # power compress 
-            gth_cprs_mag_spec = gth_mag_spec**0.3
-            est_cprs_mag_spec = est_mag_spec**0.3
+            gth_cprs_mag_spec = torch.pow(torch.clamp(gth_mag_spec,eps), 0.3)
+            est_cprs_mag_spec = torch.pow(torch.clamp(est_mag_spec,eps),0.3)
             amp_loss = F.mse_loss(
                                 gth_cprs_mag_spec, est_cprs_mag_spec
                             )*d
@@ -406,4 +410,3 @@ def test_PHASEN():
 
 if __name__ == '__main__':
     test_PHASEN()
-
